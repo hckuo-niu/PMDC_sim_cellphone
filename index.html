@@ -1,62 +1,54 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
-    <title>PMDC Motor ID - Dark Mobile</title>
+    <title>PMDC Motor ID - Data Upload Version</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        /* 深色模式基礎設定 */
         body { 
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
             margin: 10px; 
-            background: #121212; /* 極深灰背景 */
+            background: #121212; 
             color: #e0e0e0; 
         }
+        h3 { color: #ffffff; margin-bottom: 10px; text-align: center; }
         
-        h3 { color: #ffffff; margin-bottom: 20px; }
+        /* 上傳區域樣式 */
+        .upload-container {
+            background: #252525;
+            padding: 15px;
+            border-radius: 12px;
+            margin-bottom: 15px;
+            border: 2px dashed #444;
+            text-align: center;
+        }
+        .upload-container:hover { border-color: #bb86fc; }
+        input[type="file"] { color: #aaa; font-size: 0.9em; }
 
-        /* 滑桿容器調整為深灰色 */
         .slider-container { 
-            margin: 15px 0; 
+            margin: 12px 0; 
             background: #1e1e1e; 
             padding: 15px; 
             border-radius: 12px; 
             box-shadow: 0 4px 6px rgba(0,0,0,0.3); 
         }
-
-        label { 
-            display: block; 
-            font-weight: bold; 
-            margin-bottom: 8px; 
-            color: #bb86fc; /* 標題使用粉紫色點綴 */
-        }
-
-        input[type="range"] { 
-            width: 100%; 
-            height: 30px; 
-            accent-color: #bb86fc; /* 調整滑桿主色調 */
-        }
-
-        .val-disp { 
-            color: #03dac6; /* 數值顯示使用亮青色 */
-            float: right; 
-            font-family: monospace;
-            font-size: 1.1em;
-        }
-
-        /* 畫布背景 */
-        canvas { 
-            background: #1e1e1e; 
-            border-radius: 12px; 
-            margin-bottom: 15px; 
-            padding: 5px;
-        }
+        label { display: block; font-weight: bold; margin-bottom: 8px; color: #bb86fc; }
+        input[type="range"] { width: 100%; height: 30px; accent-color: #bb86fc; }
+        .val-disp { color: #03dac6; float: right; font-family: monospace; font-size: 1.1em; }
+        canvas { background: #1e1e1e; border-radius: 12px; margin-bottom: 10px; }
+        .hint { font-size: 0.8em; color: #888; margin-top: 5px; }
     </style>
 </head>
 <body>
 
-    <h3 style="text-align:center;">PMDC No-Load Identification</h3>
+    <h3>PMDC Parameter Identification</h3>
+
+    <div class="upload-container">
+        <label style="color: #fff; margin-bottom: 10px;">匯入實驗數據 (.csv)</label>
+        <input type="file" id="csvFileInput" accept=".csv">
+        <div class="hint">格式：電壓, 轉速, 電流 (第一列為標題)</div>
+    </div>
     
     <canvas id="rpmChart"></canvas>
     <canvas id="currChart"></canvas>
@@ -77,69 +69,49 @@
     </div>
 
 <script>
-// --- 1. 初始化數據與真實參數 ---
-const Va = Array.from({length: 20}, (_, i) => i * 1.6);
+// --- 1. 預設數據與狀態變數 ---
+let Va = [0, 5, 10, 15, 20, 25, 30]; 
+let rpmMeasured = [0, 310, 680, 1050, 1420, 1800, 2180];
+let iaMeasured = [0, 0.15, 0.18, 0.21, 0.24, 0.27, 0.30];
+
 const RA = 2.5;
-const KE_REAL = 0.052, VB_REAL = 1.1, B_REAL = 0.00018, TC_REAL = 0.015;
+const TC_FIXED = 0.015;
 
-function calc(v_arr, ke, vb, b, tc) {
-    return v_arr.map(v => {
-        let num = v - vb - (RA * tc / ke);
-        let den = ke + (RA * b / ke);
-        let w = num / den > 0 ? num / den : 0;
-        let ia = w > 0 ? (b * w + tc) / ke : 0;
-        return { rpm: w * 60 / (2 * Math.PI), ia: ia };
-    });
-}
-
-const realData = calc(Va, KE_REAL, VB_REAL, B_REAL, TC_REAL);
-
-// Chart.js 深色模式通用配置
-const darkOptions = {
+// --- 2. Chart.js 初始化 ---
+const darkOptions = (yMax) => ({
     responsive: true,
     scales: {
-        x: {
-            grid: { color: '#333' },
-            ticks: { color: '#aaa' }
-        },
-        y: {
-            grid: { color: '#333' },
-            ticks: { color: '#aaa' }
-        }
+        x: { grid: { color: '#333' }, ticks: { color: '#aaa' }, title: { display: true, text: 'Voltage (V)', color: '#888' } },
+        y: { grid: { color: '#333' }, ticks: { color: '#aaa' }, min: 0, max: yMax }
     },
-    plugins: {
-        legend: { labels: { color: '#e0e0e0' } }
-    }
-};
+    plugins: { legend: { labels: { color: '#e0e0e0' } } }
+});
 
-// --- 2. Chart.js 配置 ---
-const ctx1 = document.getElementById('rpmChart').getContext('2d');
-const rpmChart = new Chart(ctx1, {
+const rpmChart = new Chart(document.getElementById('rpmChart'), {
     type: 'line',
     data: {
         labels: Va,
         datasets: [
-            { label: 'Real RPM', data: realData.map(d => d.rpm), borderColor: '#ff5252', showLine: false, pointRadius: 4 },
-            { label: 'Model RPM', data: [], borderColor: '#448aff', borderWidth: 2, pointRadius: 0 }
+            { label: 'Measured RPM', data: rpmMeasured, borderColor: '#ff5252', showLine: false, pointRadius: 5 },
+            { label: 'Model Prediction', data: [], borderColor: '#448aff', borderWidth: 2, pointRadius: 0 }
         ]
     },
-    options: { ...darkOptions, scales: { ...darkOptions.scales, y: { ...darkOptions.scales.y, min: 0, max: 2000 } } }
+    options: darkOptions(2500)
 });
 
-const ctx2 = document.getElementById('currChart').getContext('2d');
-const currChart = new Chart(ctx2, {
+const currChart = new Chart(document.getElementById('currChart'), {
     type: 'line',
     data: {
         labels: Va,
         datasets: [
-            { label: 'Real Current', data: realData.map(d => d.ia), borderColor: '#ff5252', showLine: false, pointRadius: 4 },
-            { label: 'Model Current', data: [], borderColor: '#69f0ae', borderWidth: 2, pointRadius: 0 }
+            { label: 'Measured Ia', data: iaMeasured, borderColor: '#ff5252', showLine: false, pointRadius: 5 },
+            { label: 'Model Prediction', data: [], borderColor: '#69f0ae', borderWidth: 2, pointRadius: 0 }
         ]
     },
-    options: darkOptions
+    options: darkOptions(1.0)
 });
 
-// --- 3. 更新函數 ---
+// --- 3. 計算與更新邏輯 ---
 function update() {
     const ke = parseFloat(document.getElementById('ke').value);
     const vb = parseFloat(document.getElementById('vb').value);
@@ -147,18 +119,62 @@ function update() {
     
     document.getElementById('keVal').innerText = ke;
     document.getElementById('vbVal').innerText = vb;
-    document.getElementById('bVal').innerText = b;
+    document.getElementById('bVal').innerText = b.toFixed(5);
 
-    const simData = calc(Va, ke, vb, b, TC_REAL);
+    const simData = Va.map(v => {
+        let num = v - vb - (RA * TC_FIXED / ke);
+        let den = ke + (RA * b / ke);
+        let w = num / den > 0 ? num / den : 0;
+        let ia = w > 0 ? (b * w + TC_FIXED) / ke : 0;
+        return { rpm: w * 60 / (2 * Math.PI), ia: ia };
+    });
     
+    rpmChart.data.labels = Va;
+    rpmChart.data.datasets[0].data = rpmMeasured;
     rpmChart.data.datasets[1].data = simData.map(d => d.rpm);
+    
+    currChart.data.labels = Va;
+    currChart.data.datasets[0].data = iaMeasured;
     currChart.data.datasets[1].data = simData.map(d => d.ia);
     
     rpmChart.update('none');
     currChart.update('none');
 }
 
-document.querySelectorAll('input').forEach(input => input.addEventListener('input', update));
+// --- 4. 檔案處理邏輯 ---
+document.getElementById('csvFileInput').addEventListener('change', function(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = function(event) {
+        const text = event.target.result;
+        const lines = text.split(/\r?\n/);
+        
+        let newVa = [], newRpm = [], newIa = [];
+        
+        // 從第二列開始讀取 (跳過標題)
+        for (let i = 1; i < lines.length; i++) {
+            const cols = lines[i].split(',');
+            if (cols.length >= 3) {
+                newVa.push(parseFloat(cols[0]));
+                newRpm.push(parseFloat(cols[1]));
+                newIa.push(parseFloat(cols[2]));
+            }
+        }
+
+        if (newVa.length > 0) {
+            Va = newVa;
+            rpmMeasured = newRpm;
+            iaMeasured = newIa;
+            update(); // 重新計算並更新圖表
+            alert("數據匯入成功！點數：" + Va.length);
+        }
+    };
+    reader.readAsText(file);
+});
+
+document.querySelectorAll('input[type="range"]').forEach(input => input.addEventListener('input', update));
 update();
 </script>
 </body>
